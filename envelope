@@ -1,0 +1,164 @@
+#!/bin/bash
+
+# Execute a command, intercepting output and emailing if errors occur.
+# With many options to tailor behavior - 'envelope -?' for details.
+
+# Todo:
+# - Convert argument parsing to getopts.
+
+recipient=$LOGNAME
+scriptNm=$(basename $0)
+subjLine="$scriptNm RESULT for: COMMAND"
+alwaysSend=""; showEnv=""; from=""; onOutputSend=""; verbose=""; cmd=""
+replyTo=""
+sendmail=/usr/sbin/sendmail
+uname=/usr/bin/uname
+domainname=/bin/domainname
+
+UsageMsg () {
+ echo "Usage: ${scriptNm} [ -r recip ] [ -f reply-to ] [ -a | -n | -o ] [ -s subj ] [ -v ] [ -e ] cmd [ args... ]
+All output of CMD is intercepted and is emailed to TO if the
+command concludes with an error status.
+
+  -r - Email to recipient; defaults to job owner.
+  -f - Set reply-to address.
+  -s - Email subject line. Any occurences of the token
+       'RESULT' are replaced by 'error' or 'output', depending on
+       cmd status. 'COMMAND' is replaced by the command text.
+       Default subject line is defined by $subjLine script var.
+  -a - Always send mail notification, regardless of error status.
+  -n - Never send mail notification, regardless of error status.
+  -o - Send mail if there is any non-null output, stdout _or_ stderror.
+  -v - Verbose - emit results on stdout, as well as via mail.
+  -e - Include process environment in notification.
+
+Note - the command must be on the path, not a shell builtin.
+Construct a script if you want to do a complicated sh command."
+}
+
+setupLogFiles () {
+  export logFile="$(mktemp /tmp/envelope-log-XXXXXX)"
+  touch $logFile
+  rmLogFile () { rm -f $logFile; }
+  trap rmLogFile 0
+  export preLogFile="$(mktemp /tmp/envelope-pre-XXXXXX)"
+  touch $preLogFile
+  rmPreLogFile () { rm -f $preLogFile; }
+  trap rmPreLogFile 0
+}
+
+PrepSubjLine () {
+  preppedSubjLine=`echo "$subjLine" \
+		   | sed -e sCOMMAND"$cmd"g  -e sRESULT"$result"g`
+}
+
+preppedFromLine=""
+PrepFromLine () {
+  host=`$uname -n`
+  courtesy="$LOGNAME@$host"
+  preppedFromLine="$LOGNAME (envelope)"
+}
+
+SendEMail () {
+  # Put address and subject in head of message:
+  PrepFromLine
+
+  PrepSubjLine
+  echo "Subject: $preppedSubjLine" >> $preLogFile
+  if [ -n "$replyTo" ]; then
+    echo "Reply-To: $replyTo" >> $preLogFile
+  fi
+  echo "" >> $preLogFile
+  echo "$scriptNm run...
+
+command:	$cmd
+for:		$LOGNAME@$host
+result status: 	$status
+invoked as:
+  $wrap
+  " >> $preLogFile
+  echo "" >> $preLogFile
+  if [ -z "$showEnv" ]; then
+    echo "execution PATH:" >> $preLogFile
+    wasIFS="$IFS"; IFS=":$IFS" 
+    for dir in $PATH; do
+      echo $dir
+    done | \
+      xargs -s75 echo | awk '{printf("\t")
+			       for (i=1; i<=NF; i++) printf(":%s", $i)
+			       print ""}'  >> $preLogFile
+    IFS="$wasIFS"
+    echo "" >> $preLogFile
+  else
+    echo "	Process environment:" >> $preLogFile
+    env >> $preLogFile
+  fi
+  echo "Output (stdout and stderr):" >> $preLogFile
+  echo "--------------------------" >> $preLogFile
+  cat $preLogFile $logFile | $sendmail -F "$LOGNAME (enveloped)" $recipient
+  rm -f $preLogFile
+}
+
+  # Parse the command line:
+wrap="$0 $@"
+while [ "$*" != "" ]; do
+  case "$1" in
+    -a ) alwaysSend=t; shift;;
+    -e ) showEnv=t; shift;;
+    -f ) shift; replyTo="$1"; shift;;
+    -n ) neverSend=t; shift;;
+    -o ) onOutputSend=t; shift;;
+    -r ) shift; recipient="$1"; shift;;
+    -s ) shift; subjLine="$1"; shift;;
+    -v ) verbose=t; shift;;
+    -h* | -? ) UsageMsg; exit 0;;
+    -* ) echo "${scriptNm}: unknown flag $1" 1>&2
+         UsageMsg
+         date
+         exit 1;;
+    * ) if [ -z "$recipient" ]; then
+          shift; recipient="$1"				# Garner the recipient
+        else
+          cmd="$@"
+          break			                        # Leave the rest in $@
+        fi;;
+  esac
+done
+
+setupLogFiles
+status=0
+
+( "$@" ) > $logFile 2>&1; status=$?
+
+if [ $status != 0 ]; then
+  result="err $status"
+else
+  result=output
+fi
+
+if [ -n "$neverSend" ]; then
+  doSend=""
+elif [ -n "$alwaysSend" -o $status != 0 ]; then
+  doSend=t
+  if [ ! -s $logFile ]; then
+    if [ $status = 0 ]; then result="(null) $result"
+    else                     result="$result (null output)"
+    fi
+  fi
+elif [ -n "$onOutputSend" -a -s $logFile ]; then
+  doSend=t
+fi
+
+if [ -n "$doSend" ]; then
+  SendEMail
+fi
+
+if [ -n "$verbose" ]; then
+  cat $logFile
+  rm -f $logFile
+  exit $status
+else
+  rm -f $logFile
+  exit 0
+fi
+
