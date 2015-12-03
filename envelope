@@ -12,7 +12,13 @@ subjLine="$scriptNm RESULT for: COMMAND"
 alwaysSend=""; showEnv=""; from=""; onOutputSend=""; verbose=""; cmd=""
 replyTo=""
 sendmail=/usr/sbin/sendmail
-uname=/usr/bin/uname
+if [ -x /bin/uname ]; then
+  uname=/bin/uname
+elif [ -x /usr/bin/uname ]; then
+  uname=/usr/bin/uname
+else
+  uname=uname
+fi
 domainname=/bin/domainname
 
 UsageMsg () {
