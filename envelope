@@ -4,6 +4,7 @@
 # With many options to tailor behavior - 'envelope -h' for details.
 
 # Todo:
+# - Consider using `sh -c "command"` for composite commands; quoting hell?
 # - Convert argument parsing to getopts.
 
 recipient=$LOGNAME
