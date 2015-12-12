@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Execute a command, intercepting output and emailing if errors occur.
-# With many options to tailor behavior - 'envelope -?' for details.
+# With many options to tailor behavior - 'envelope -h' for details.
 
 # Todo:
 # - Convert argument parsing to getopts.
@@ -28,39 +28,37 @@ command concludes with an error status.
 
   -r - Email to recipient; defaults to job owner.
   -f - Set reply-to address.
-  -s - Email subject line. Any occurences of the token
-       'RESULT' are replaced by 'error' or 'output', depending on
-       cmd status. 'COMMAND' is replaced by the command text.
+  -s - Subject line for email. Any occurences of the token 'RESULT' are 
+       replaced with "ok" for exit status 0 or "error: <status>" for non-zero
+       status. 'COMMAND' is replaced by the command text, in double quotes.
        Default subject line is defined by $subjLine script var.
   -a - Always send mail notification, regardless of error status.
   -n - Never send mail notification, regardless of error status.
-  -o - Send mail if there is any non-null output, stdout _or_ stderror.
+  -o - Send mail if there is any non-null stdout _or_ stderr output.
   -v - Verbose - emit results on stdout, as well as via mail.
-  -e - Include process environment in notification.
+  -e - List process environment settings in notification.
 
-Note - the command must be on the path, not a shell builtin.
-Construct a script if you want to do a complicated sh command."
+The invoked command must be on the path, not a shell builtin.
+Construct a script if you want to do a complicated shell command."
 }
 
 setupLogFiles () {
   export logFile="$(mktemp /tmp/envelope-log-XXXXXX)"
   touch $logFile
-  rmLogFile () { rm -f $logFile; }
-  trap rmLogFile 0
+  trap "rm -f $logFile" 0
   export preLogFile="$(mktemp /tmp/envelope-pre-XXXXXX)"
   touch $preLogFile
-  rmPreLogFile () { rm -f $preLogFile; }
-  trap rmPreLogFile 0
+  trap "rm -f $preLogFile" 0
 }
 
 PrepSubjLine () {
   preppedSubjLine=`echo "$subjLine" \
-		   | sed -e sCOMMAND"$cmd"g  -e sRESULT"$result"g`
+		   | sed -e sCOMMAND"\"$cmd\""g  -e sRESULT"$result"g`
 }
 
 preppedFromLine=""
 PrepFromLine () {
-  host=`$uname -n`
+  host=`$uname -f`
   courtesy="$LOGNAME@$host"
   preppedFromLine="$LOGNAME (envelope)"
 }
@@ -75,15 +73,13 @@ SendEMail () {
     echo "Reply-To: $replyTo" >> $preLogFile
   fi
   echo "" >> $preLogFile
-  echo "$scriptNm run...
+  echo "$scriptNm run:
 
 command:	$cmd
 for:		$LOGNAME@$host
 result status: 	$status
 invoked as:
-  $wrap
-  " >> $preLogFile
-  echo "" >> $preLogFile
+  $command_with_quotes" >> $preLogFile
   if [ -z "$showEnv" ]; then
     echo "execution PATH:" >> $preLogFile
     wasIFS="$IFS"; IFS=":$IFS" 
@@ -94,7 +90,6 @@ invoked as:
 			       for (i=1; i<=NF; i++) printf(":%s", $i)
 			       print ""}'  >> $preLogFile
     IFS="$wasIFS"
-    echo "" >> $preLogFile
   else
     echo "	Process environment:" >> $preLogFile
     env >> $preLogFile
@@ -105,8 +100,20 @@ invoked as:
   rm -f $preLogFile
 }
 
-  # Parse the command line:
-wrap="$0 $@"
+InferQuotations () {
+  # Echo argument list with quotations surrounding elements containing spaces.
+  got=""
+  for item in "$@"; do
+    case "$item" in
+      *\ * ) got+=" \"$item\"";;
+      * ) got+=" $item";;
+    esac
+  done
+  echo "${got:1}"
+}
+
+# Parse the command line, inferring quotes:
+command_with_quotes="$(InferQuotations $0 "$@")"
 while [ "$*" != "" ]; do
   case "$1" in
     -a ) alwaysSend=t; shift;;
@@ -137,9 +144,9 @@ status=0
 ( "$@" ) > $logFile 2>&1; status=$?
 
 if [ $status != 0 ]; then
-  result="err $status"
+  result="error ($status)"
 else
-  result=output
+  result="ok (0)"
 fi
 
 if [ -n "$neverSend" ]; then
@@ -147,9 +154,7 @@ if [ -n "$neverSend" ]; then
 elif [ -n "$alwaysSend" -o $status != 0 ]; then
   doSend=t
   if [ ! -s $logFile ]; then
-    if [ $status = 0 ]; then result="(null) $result"
-    else                     result="$result (null output)"
-    fi
+    result="$result (no output)"
   fi
 elif [ -n "$onOutputSend" -a -s $logFile ]; then
   doSend=t
