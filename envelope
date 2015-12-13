@@ -13,14 +13,6 @@ subjLine="$scriptNm RESULT for: COMMAND"
 alwaysSend=""; showEnv=""; from=""; onOutputSend=""; verbose=""; cmd=""
 replyTo=""
 sendmail=/usr/sbin/sendmail
-if [ -x /bin/uname ]; then
-  uname=/bin/uname
-elif [ -x /usr/bin/uname ]; then
-  uname=/usr/bin/uname
-else
-  uname=uname
-fi
-domainname=/bin/domainname
 
 UsageMsg () {
  echo "Usage: ${scriptNm} [ -r recip ] [ -f reply-to ] [ -a | -n | -o ] [ -s subj ] [ -v ] [ -e ] cmd [ args... ]
@@ -59,7 +51,7 @@ PrepSubjLine () {
 
 preppedFromLine=""
 PrepFromLine () {
-  host=`$uname -f`
+  host=$(hostname -f)
   courtesy="$LOGNAME@$host"
   preppedFromLine="$LOGNAME (envelope)"
 }
@@ -74,13 +66,13 @@ SendEMail () {
     echo "Reply-To: $replyTo" >> $preLogFile
   fi
   echo "" >> $preLogFile
-  echo "$scriptNm run:
-
-command:	$cmd
-for:		$LOGNAME@$host
-result status: 	$status
-invoked as:
-  $command_with_quotes" >> $preLogFile
+  echo "    $scriptNm run:
+Command:	$cmd
+For:		$LOGNAME@$host
+Result status: 	$status
+Invoked as:
+  $command_with_quotes
+In working dir: $(pwd)" >> $preLogFile
   if [ -z "$showEnv" ]; then
     echo "execution PATH:" >> $preLogFile
     wasIFS="$IFS"; IFS=":$IFS" 
@@ -101,7 +93,7 @@ invoked as:
   rm -f $preLogFile
 }
 
-InferQuotations () {
+InferQuotes () {
   # Echo argument list with quotations surrounding elements containing spaces.
   got=""
   for item in "$@"; do
@@ -114,7 +106,7 @@ InferQuotations () {
 }
 
 # Parse the command line, inferring quotes:
-command_with_quotes="$(InferQuotations $0 "$@")"
+command_with_quotes="$(InferQuotes $0 "$@")"
 while [ "$*" != "" ]; do
   case "$1" in
     -a ) alwaysSend=t; shift;;
@@ -133,7 +125,7 @@ while [ "$*" != "" ]; do
     * ) if [ -z "$recipient" ]; then
           shift; recipient="$1"				# Garner the recipient
         else
-          cmd="$@"
+          cmd="$(InferQuotes "$@")"
           break			                        # Leave the rest in $@
         fi;;
   esac
@@ -173,4 +165,3 @@ else
   rm -f $logFile
   exit 0
 fi
-
