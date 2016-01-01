@@ -22,7 +22,7 @@ command concludes with an error status.
   -r - Email to recipient; defaults to job owner.
   -f - Set reply-to address.
   -s - Subject line for email. Any occurences of the token 'RESULT' are 
-       replaced with "ok" for exit status 0 or "error: <status>" for non-zero
+       replaced with 'ok' for exit status 0 or 'error: <status>' for non-zero
        status. 'COMMAND' is replaced by the command text, in double quotes.
        Default subject line is defined by $subjLine script var.
   -a - Always send mail notification, regardless of error status.
