@@ -1,57 +1,68 @@
 #!/bin/bash
 
 # Execute a command, intercepting output and emailing if errors occur.
-# With many options to tailor behavior - 'envelope -h' for details.
+# With many options to tailor behavior - 'envelope -?' for details.
 
 # Todo:
-# - Consider using `sh -c "command"` for composite commands; quoting hell?
 # - Convert argument parsing to getopts.
 
+wrap="$0 $*"
 recipient=$LOGNAME
 scriptNm=$(basename $0)
 subjLine="$scriptNm RESULT for: COMMAND"
 alwaysSend=""; showEnv=""; from=""; onOutputSend=""; verbose=""; cmd=""
-replyTo=""
+grepFor=""; replyTo=""; DEBUG=""
 sendmail=/usr/sbin/sendmail
+if [ -x /bin/uname ]; then
+  uname=/bin/uname
+elif [ -x /usr/bin/uname ]; then
+  uname=/usr/bin/uname
+else
+  uname=uname
+fi
+domainname=/bin/domainname
 
 UsageMsg () {
- echo "Usage: ${scriptNm} [ -r recip ] [ -f reply-to ] [ -a | -n | -o ] [ -s subj ] [ -v ] [ -e ] cmd [ args... ]
+ echo "Usage: ${scriptNm} [ -r recip ] [ -f reply-to ] [ -s subj ] [ -a | -n | -o ] [ -g string ] [ -v ] [ -e ] cmd [ args... ]
 All output of CMD is intercepted and is emailed to TO if the
 command concludes with an error status.
 
   -r - Email to recipient; defaults to job owner.
   -f - Set reply-to address.
-  -s - Subject line for email. Any occurences of the token 'RESULT' are 
-       replaced with 'ok' for exit status 0 or 'error: <status>' for non-zero
-       status. 'COMMAND' is replaced by the command text, in double quotes.
-       Default subject line is defined by $subjLine script var.
-  -a - Always send mail notification, regardless of error status.
-  -n - Never send mail notification, regardless of error status.
-  -o - Send mail if there is any non-null stdout _or_ stderr output.
+  -s - Email subject line. Any occurences of the token
+       'RESULT' are replaced by 'error' or 'output', depending on
+       cmd status. 'COMMAND' is replaced by the command text.
+       Default subject line is: $subjLine
+  -a - Send mail notification, regardless of error status.
+  -n - Do not send mail notification, regardless of error status.
+  -o - Send mail if there is any non-null output, stdout _or_ stderror.
+  -g - Send mail if output includes grep match for string
   -v - Verbose - emit results on stdout, as well as via mail.
-  -e - List process environment settings in notification.
+  -e - Include process environment in notification.
+  -d - Debug - execute CMD, but present results and sendmail cmd, don't send
 
-The invoked command must be on the path, not a shell builtin.
-Construct a script if you want to do a complicated shell command."
+If CMD is complex statement, quote it so it is parsed as a single token."
 }
 
 setupLogFiles () {
   export logFile="$(mktemp /tmp/envelope-log-XXXXXX)"
   touch $logFile
-  trap "rm -f $logFile" 0
+  rmLogFile () { rm -f $logFile; }
+  trap rmLogFile 0
   export preLogFile="$(mktemp /tmp/envelope-pre-XXXXXX)"
   touch $preLogFile
-  trap "rm -f $preLogFile" 0
+  rmPreLogFile () { rm -f $preLogFile; }
+  trap rmPreLogFile 0
 }
 
 PrepSubjLine () {
   preppedSubjLine=`echo "$subjLine" \
-		   | sed -e sCOMMAND"\"$cmd\""g  -e sRESULT"$result"g`
+		   | sed -e sCOMMAND"$cmd"g  -e sRESULT"$result"g`
 }
 
 preppedFromLine=""
 PrepFromLine () {
-  host=$(hostname -f)
+  host=`$uname -n`
   courtesy="$LOGNAME@$host"
   preppedFromLine="$LOGNAME (envelope)"
 }
@@ -66,13 +77,14 @@ SendEMail () {
     echo "Reply-To: $replyTo" >> $preLogFile
   fi
   echo "" >> $preLogFile
-  echo "    $scriptNm run:
-Command:	$cmd
-For:		$LOGNAME@$host
-Result status: 	$status
-Invoked as:
-  $command_with_quotes
-In working dir: $(pwd)" >> $preLogFile
+  echo "$scriptNm run...
+
+command:	$cmd
+for:		$LOGNAME@$host
+result status: 	$status
+invoked as:
+  $wrap" >> $preLogFile
+  echo "" >> $preLogFile
   if [ -z "$showEnv" ]; then
     echo "execution PATH:" >> $preLogFile
     wasIFS="$IFS"; IFS=":$IFS" 
@@ -83,13 +95,19 @@ In working dir: $(pwd)" >> $preLogFile
 			       for (i=1; i<=NF; i++) printf(":%s", $i)
 			       print ""}'  >> $preLogFile
     IFS="$wasIFS"
+    echo "" >> $preLogFile
   else
     echo "	Process environment:" >> $preLogFile
     env >> $preLogFile
   fi
   echo "Output (stdout and stderr):" >> $preLogFile
   echo "--------------------------" >> $preLogFile
-  cat $preLogFile $logFile | $sendmail -F "$LOGNAME (enveloped)" $recipient
+  if [ "$DEBUG" != "t" ]; then
+    cat $preLogFile $logFile | $sendmail -F "$LOGNAME (enveloped)" $recipient
+  else
+    cat $preLogFile $logFile
+    echo $sendmail -F "$LOGNAME (enveloped)" $recipient
+  fi
   rm -f $preLogFile
 }
 
@@ -110,14 +128,16 @@ command_with_quotes="$(InferQuotes $0 "$@")"
 while [ "$*" != "" ]; do
   case "$1" in
     -a ) alwaysSend=t; shift;;
+    -d ) DEBUG=t; shift;;
     -e ) showEnv=t; shift;;
     -f ) shift; replyTo="$1"; shift;;
+    -g ) shift; grepFor="$1"; shift;;
     -n ) neverSend=t; shift;;
     -o ) onOutputSend=t; shift;;
     -r ) shift; recipient="$1"; shift;;
     -s ) shift; subjLine="$1"; shift;;
     -v ) verbose=t; shift;;
-    -h* | -? ) UsageMsg; exit 0;;
+    -h* | -? | --help ) UsageMsg; exit 0;;
     -* ) echo "${scriptNm}: unknown flag $1" 1>&2
          UsageMsg
          date
@@ -134,12 +154,12 @@ done
 setupLogFiles
 status=0
 
-( "$@" ) > $logFile 2>&1; status=$?
+sh -c "$@" > $logFile 2>&1; status=$?
 
 if [ $status != 0 ]; then
-  result="error ($status)"
+  result="err $status"
 else
-  result="ok (0)"
+  result=output
 fi
 
 if [ -n "$neverSend" ]; then
@@ -147,10 +167,16 @@ if [ -n "$neverSend" ]; then
 elif [ -n "$alwaysSend" -o $status != 0 ]; then
   doSend=t
   if [ ! -s $logFile ]; then
-    result="$result (no output)"
+    if [ $status = 0 ]; then result="(null) $result"
+    else                     result="$result (null output)"
+    fi
   fi
 elif [ -n "$onOutputSend" -a -s $logFile ]; then
   doSend=t
+elif [ -n "grepFor" -a -s $logFile ]; then
+  if grep -s "$grepFor" $logFile > /dev/null; then
+    doSend=t
+  fi
 fi
 
 if [ -n "$doSend" ]; then
