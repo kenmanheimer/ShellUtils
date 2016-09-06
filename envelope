@@ -39,9 +39,7 @@ command concludes with an error status.
   -g - Send mail if output includes grep match for string
   -v - Verbose - emit results on stdout, as well as via mail.
   -e - Include process environment in notification.
-  -d - Debug - execute CMD, but present results and sendmail cmd, don't send
-
-If CMD is complex statement, quote it so it is parsed as a single token."
+  -d - Debug - execute CMD, but present results and sendmail cmd, don't send"
 }
 
 setupLogFiles () {
@@ -151,10 +149,16 @@ while [ "$*" != "" ]; do
   esac
 done
 
+if [ -z "$*" ]; then
+  echo "${scriptNm}: non-empty command required" 1>&2
+  UsageMsg
+  exit 1
+fi
+
 setupLogFiles
 status=0
 
-sh -c "$@" > $logFile 2>&1; status=$?
+sh -c "$*" > $logFile 2>&1; status=$?
 
 if [ $status != 0 ]; then
   result="err $status"
