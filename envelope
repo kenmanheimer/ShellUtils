@@ -173,7 +173,7 @@ elif [ -n "$alwaysSend" -o $status != 0 ]; then
   fi
 elif [ -n "$onOutputSend" -a -s $logFile ]; then
   doSend=t
-elif [ -n "grepFor" -a -s $logFile ]; then
+elif [ -n "$grepFor" -a -s $logFile ]; then
   if grep -s "$grepFor" $logFile > /dev/null; then
     doSend=t
   fi
