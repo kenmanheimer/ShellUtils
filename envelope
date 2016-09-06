@@ -23,15 +23,15 @@ fi
 domainname=/bin/domainname
 
 UsageMsg () {
- echo "Usage: ${scriptNm} [ -r recip ] [ -f reply-to ] [ -s subj ] [ -a | -n | -o ] [ -g string ] [ -v ] [ -e ] cmd [ args... ]
-All output of CMD is intercepted and is emailed to TO if the
-command concludes with an error status.
+ echo "Usage: ${scriptNm} [ -r recip ] [ -f reply-to ] [ -s subj ] [ -a | -n | -o ] [ -g string ] [ -v ] [ -e ] CMD [ cmd-args... ]
+CMD output is intercepted and is emailed to recip, by default if the command
+concludes with an error status, or other conditions per some of these options:
 
   -r - Email to recipient; defaults to job owner.
   -f - Set reply-to address.
   -s - Email subject line. Any occurences of the token
        'RESULT' are replaced by 'error' or 'output', depending on
-       cmd status. 'COMMAND' is replaced by the command text.
+       cmd status. 'COMMAND' is replaced by the command text and args.
        Default subject line is: $subjLine
   -a - Send mail notification, regardless of error status.
   -n - Do not send mail notification, regardless of error status.
@@ -104,7 +104,7 @@ invoked as:
     cat $preLogFile $logFile | $sendmail -F "$LOGNAME (enveloped)" $recipient
   else
     cat $preLogFile $logFile
-    echo $sendmail -F "$LOGNAME (enveloped)" $recipient
+    echo $sendmail -F "$LOGNAME (envelope)" $recipient
   fi
   rm -f $preLogFile
 }
